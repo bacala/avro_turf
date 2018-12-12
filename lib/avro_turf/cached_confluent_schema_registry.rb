@@ -29,6 +29,12 @@ class AvroTurf::CachedConfluentSchemaRegistry
   end
 
   def register(subject, schema)
-    @cache.lookup_by_schema(subject, schema) || @cache.store_by_schema(subject, schema, @upstream.register(subject, schema))
+    @cache.lookup_by_schema(subject, schema) || begin
+                                      if @upstream.check(subject, schema) then
+                                        @cache.store_by_schema(subject, schema, @upstream.fetch_id(subject, schema))
+                                      else
+                                        @cache.store_by_schema(subject, schema, @upstream.register(subject, schema))
+                                      end
+    end
   end
 end

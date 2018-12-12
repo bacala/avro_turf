@@ -1,54 +1,45 @@
-require 'excon'
+require 'schema_registry'
 
 class AvroTurf::ConfluentSchemaRegistry
-  CONTENT_TYPE = "application/vnd.schemaregistry.v1+json".freeze
 
   def initialize(url, logger: Logger.new($stdout))
     @logger = logger
-    @connection = Excon.new(url, headers: {
-      "Content-Type" => CONTENT_TYPE,
-    })
+    @client = SchemaRegistry::Client.new(url)
   end
 
   def fetch(id)
     @logger.info "Fetching schema with id #{id}"
-    data = get("/schemas/ids/#{id}")
-    data.fetch("schema")
+    @client.schema(id)
+  end
+ 
+  def fetch_id(subject, schema)
+    @logger.info "Fetching id with subject #{subject} and schema."
+    SchemaRegistry::Subject.new(@client, subject.to_s).verify_schema(schema).id
   end
 
   def register(subject, schema)
-    data = post("/subjects/#{subject}/versions", body: {
-      schema: schema.to_s
-    }.to_json)
-
-    id = data.fetch("id")
-
-    @logger.info "Registered schema for subject `#{subject}`; id = #{id}"
-
-    id
+    @logger.info "Registered schema for subject `#{subject}`"
+    SchemaRegistry::Subject.new(@client, subject.to_s).register_schema(schema)
   end
 
   # List all subjects
   def subjects
-    get('/subjects')
+    @client.subjects
   end
 
   # List all versions for a subject
   def subject_versions(subject)
-    get("/subjects/#{subject}/versions")
+    SchemaRegistry::Subject.new(@client, subject.to_s).versions
   end
 
   # Get a specific version for a subject
   def subject_version(subject, version = 'latest')
-    get("/subjects/#{subject}/versions/#{version}")
+    SchemaRegistry::Subject.new(@client, subject.to_s).version("latest")
   end
 
   # Check if a schema exists. Returns nil if not found.
   def check(subject, schema)
-    data = post("/subjects/#{subject}",
-                expects: [200, 404],
-                body: { schema: schema.to_s }.to_json)
-    data unless data.has_key?("error_code")
+    SchemaRegistry::Subject.new(@client, subject.to_s).schema_registered?(schema)
   end
 
   # Check if a schema is compatible with the stored version.
@@ -58,49 +49,27 @@ class AvroTurf::ConfluentSchemaRegistry
   # - false if incompatible
   # http://docs.confluent.io/3.1.2/schema-registry/docs/api.html#compatibility
   def compatible?(subject, schema, version = 'latest')
-    data = post("/compatibility/subjects/#{subject}/versions/#{version}",
-                expects: [200, 404],
-                body: { schema: schema.to_s }.to_json)
-    data.fetch('is_compatible', false) unless data.has_key?('error_code')
+    SchemaRegistry::Subject.new(@client, subject.to_s).compatible?(schema, version)
   end
-
+  
   # Get global config
   def global_config
-    get("/config")
+    @client.request(:get, "/config")
   end
 
   # Update global config
   def update_global_config(config)
-    put("/config", { body: config.to_json })
+    @client.request(:put, "/config",  body: config.to_json)
   end
 
   # Get config for subject
   def subject_config(subject)
-    get("/config/#{subject}")
+    @client.request(:get, "/config/#{subject}")
   end
 
   # Update config for subject
   def update_subject_config(subject, config)
-    put("/config/#{subject}", { body: config.to_json })
+    @client.request(:put, "/config/#{subject}", body: config.to_json)
   end
 
-  private
-
-  def get(path, **options)
-    request(path, method: :get, **options)
-  end
-
-  def put(path, **options)
-    request(path, method: :put, **options)
-  end
-
-  def post(path, **options)
-    request(path, method: :post, **options)
-  end
-
-  def request(path, **options)
-    options = { expects: 200 }.merge!(options)
-    response = @connection.request(path: path, **options)
-    JSON.parse(response.body)
-  end
 end

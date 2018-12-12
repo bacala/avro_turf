@@ -1,5 +1,7 @@
 source 'https://rubygems.org'
 
+gem 'schema_registry'
+
 # Specify your gem's dependencies in avro_turf.gemspec
 gemspec
 
